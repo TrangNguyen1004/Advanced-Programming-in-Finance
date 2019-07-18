@@ -48,6 +48,7 @@ from sklearn.metrics import accuracy_score
 
 from mxnet import nd, autograd, gluon
 from mxnet.gluon import nn, rnn
+from mxnet.gluon import block
 import mxnet as mx
 
 import warnings
@@ -390,6 +391,8 @@ fft_list_m10 = np.copy(fft_list)
 fft_list_m10[100:-100] = 0
 fft_df['fft_100_component'] = np.fft.ifft(fft_list_m10)
 
+type(fft_df['fft_3_component'].values)
+
 fourier_transform_data = fft_df[['fft', 'fft_3_component', 'fft_6_component', 'fft_9_component', 'fft_100_component']]
 fourier_transform_data['Date'] = data_FT['Date']
 fourier_transform_data = fourier_transform_data.set_index('Date')
@@ -472,9 +475,35 @@ print(len(corr_asset_data), len(fourier_transform_data), len(technical_data))
 
 VAE_data = pd.merge(fourier_transform_data, technical_data, left_index = True, right_index = True)
 VAE_data = pd.merge(VAE_data, corr_asset_data, left_index = True, right_index = True)
-VAE_data.head()
+VAEdata = VAE_data.iloc[:, [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 26]]
+VAEdata.head()
 
-len(VAE_data)
+len(VAEdata)
+
+# Store data to csv
+
+def store_data_csv(data, path, name):
+  
+  # Save current data file
+  list_files = os.listdir(path)
+  for file in list_files:
+    if file == name + '.csv':
+      os.rename(path + file, path + name + '_old' + '.csv')
+  
+  #Import crawl data to new csv file
+  with open (os.path.join(path, name + '.csv'), 'w') as myfile:
+    data.to_csv(myfile, encoding = 'utf-8')
+    status = 'New'
+    
+  #Delete ole file if new file created  
+
+  if status == 'New':
+    list_files = os.listdir(path)
+    for file in list_files:
+        if file == name + '_old' + '.csv':
+          os.remove(path + file)
+
+store_data_csv(VAEdata, my_path, 'VAEdata')
 
 """## Feature importance with XGBoost
 
@@ -484,7 +513,7 @@ Having so many features we have to consider whether all of them are really indic
 def get_feature_importance_data(data_income, train_test_rate):
     data = data_income.copy()
     y = data['price']
-    X = data.iloc[:, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 26]]
+    X = data.iloc[:, 1:]
     
     train_samples = int(X.shape[0] * train_test_rate)
  
@@ -498,7 +527,7 @@ def get_feature_importance_data(data_income, train_test_rate):
 
 # Get training and test data
 
-(X_train_VAE, y_train_VAE), (X_test_VAE, y_test_VAE) = get_feature_importance_data(VAE_data, 0.8)
+(X_train_VAE, y_train_VAE), (X_test_VAE, y_test_VAE) = get_feature_importance_data(VAEdata, 0.9)
 # (X_train_FI, y_train_FI), (X_test_FI, y_test_FI) = get_feature_importance_data(dataset_TI_df, 0.8)
 
 X_train_VAE.head()
@@ -650,6 +679,8 @@ class VAE(gluon.HybridBlock):
 
         return loss
 
+dir(VAE)
+
 n_hidden = 400 # neurons in each layer
 n_latent = 2 
 n_layers = 3 # num of dense layers in encoder and decoder respectively
@@ -657,11 +688,56 @@ n_output = VAE_data.shape[1]-1
 
 net = VAE(n_hidden = n_hidden, n_latent = n_latent, n_layers = n_layers, n_output = n_output, batch_size = batch_size, act_type = 'relu')
 
+dir(net)
+
 net.collect_params().initialize(mx.init.Xavier(), ctx=mx.cpu())
 net.hybridize()
 trainer = gluon.Trainer(net.collect_params(), 'adam', {'learning_rate': .01})
 
 print(net)
+
+n_epoch = 150
+print_period = n_epoch // 10
+start = time.time()
+
+training_loss = []
+validation_loss = []
+
+batch.data[0].as_in_context(mx.cpu())
+
+epoch_loss = 0
+epoch_val_loss = 0
+
+train_iter.reset()
+test_iter.reset()
+
+n_batch_train = 0
+for batch in train_iter:
+    n_batch_train +=1
+    data = batch.data[0].as_in_context(mx.cpu())
+
+#     with autograd.record():
+#         loss = net(data)
+#     loss.backward()
+#     trainer.step(data.shape[0])
+#     epoch_loss += nd.mean(loss).asscalar()
+
+# n_batch_val = 0
+# for batch in test_iter:
+#     n_batch_val +=1
+#     data = batch.data[0].as_in_context(mx.cpu())
+#     loss = net(data)
+#     epoch_val_loss += nd.mean(loss).asscalar()
+
+# epoch_loss /= n_batch_train
+# epoch_val_loss /= n_batch_val
+
+# training_loss.append(epoch_loss)
+# validation_loss.append(epoch_val_loss)
+
+"""if epoch % max(print_period, 1) == 0:
+    print('Epoch {}, Training loss {:.2f}, Validation loss {:.2f}'.\
+          format(epoch, epoch_loss, epoch_val_loss))"""
 
 """# 8. Generative Adversarial Network (GAN)
 
@@ -711,7 +787,7 @@ $$\text{tanh}(x) = \left[\frac{1-\exp(-2x_1)}{1+\exp(-2x_1)}, \ldots, \frac{1-\e
 
 # dataset_total_df (include related assets, need add more data to use it)
 
-gan_num_features = dataset_ex_df.shape[1]
+gan_num_features = VAEdata.shape[1]
 sequence_length = 17
 
 class RNNModel(gluon.Block):
